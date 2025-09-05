@@ -13,5 +13,17 @@ public class Books {
     public int    subjectSeq;    
     public String description;   
     public BigDecimal price;     
-    public String imageURL;  
+    public String imageURL;
+	public String getTitle() {
+		// TODO Auto-generated method stub
+		return null;
+	}
+	public Object getCallNumber() {
+		// TODO Auto-generated method stub
+		return null;
+	}
+	public void setAvailable(boolean b) {
+		// TODO Auto-generated method stub
+		
+	}  
 }
