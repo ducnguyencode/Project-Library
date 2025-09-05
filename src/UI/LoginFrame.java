@@ -34,14 +34,27 @@ public class LoginFrame extends JFrame {
     }
 
     private void doLogin() {
-        String user = txtUsername.getText();
+        String user = txtUsername.getText().trim();
         String pass = new String(txtPassword.getPassword());
 
-        if (user.equals("Alu") && pass.equals("123")) {
-            dispose();
-            new MainFrame().setVisible(true);
-        } else {
-            JOptionPane.showMessageDialog(this, "Invalid login!", "Error", JOptionPane.ERROR_MESSAGE);
+        try {
+            Long uid = new DAO.UserDAO().login(user, pass);
+            if (uid != null) {
+                dispose();
+                javax.swing.SwingUtilities.invokeLater(() -> {
+                    try { new MainFrame().setVisible(true); }
+                    catch (Throwable t) {
+                        t.printStackTrace();
+                        JOptionPane.showMessageDialog(null, "Lỗi mở màn hình chính: " + t.getMessage());
+                    }
+                });
+            } else {
+                JOptionPane.showMessageDialog(this, "Invalid login!", "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Login error: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 }

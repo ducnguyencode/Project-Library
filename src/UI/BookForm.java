@@ -1,48 +1,276 @@
+// UI/BookForm.java
 package UI;
 
+import DAO.BookDAO;
+import DAO.BookCopyDAO;
+import DAO.SubjectDAO;
 import Model.Books;
+import Model.BookCopy;
+import Model.Subject;
 
+import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.util.ArrayList;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.net.URL;
+import java.math.BigDecimal;
+import java.util.*;
+import java.util.List;
+import java.util.Map;
 
 public class BookForm extends JPanel {
-    private JTable table;
-    private DefaultTableModel model;
-    private ArrayList<Books> books;
+
+    // Filter
+    private final JTextField tfIsbn   = new JTextField(10);
+    private final JTextField tfAuthor = new JTextField(10);
+    private final JTextField tfTitle  = new JTextField(12);
+
+    // Table
+    private final DefaultTableModel model = new DefaultTableModel(
+            new Object[]{"BookID","Cover","ISBN","Title","Author","Price","Total","Available"},0) {
+        public boolean isCellEditable(int r,int c){ return false; }
+    };
+    private final JTable tbl = new JTable(model) {
+        @Override public Class<?> getColumnClass(int column) {
+            return column==1 ? Icon.class : Object.class;
+        }
+    };
+
+    // cache ảnh nhỏ
+    private final Map<String, ImageIcon> coverCache = new HashMap<>();
+    private static final int COVER_W = 48, COVER_H = 64;
+
+    // Buttons
+    private final JButton btSearch  = new JButton("Search");
+    private final JButton btAdd     = new JButton("Add Book");
+    private final JButton btEdit    = new JButton("Edit Book");
+    private final JButton btDelete  = new JButton("Delete Book");
+    private final JButton btAddCopy = new JButton("Add Copy");
+    private final JButton btCopies  = new JButton("View Copies");
+    private final JButton btAvail   = new JButton("Mark Available");
+    private final JButton btLost    = new JButton("Mark Lost");
+    private final JButton btDamage  = new JButton("Mark Damaged");
+    private final JButton btRetire  = new JButton("Retire");
+
+    // DAO
+    private final BookDAO bookDAO = new BookDAO();
+    private final BookCopyDAO copyDAO = new BookCopyDAO();
+    private final SubjectDAO subjectDAO = new SubjectDAO();
 
     public BookForm() {
-        setLayout(new BorderLayout());
+        setLayout(new BorderLayout(8,8));
 
-        books = TransactionMockData.getBooks();
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        top.add(new JLabel("ISBN:"));   top.add(tfIsbn);
+        top.add(new JLabel("Author:")); top.add(tfAuthor);
+        top.add(new JLabel("Title:"));  top.add(tfTitle);
+        top.add(btSearch);
+        add(top, BorderLayout.NORTH);
 
-        String[] cols = {"Call Number", "ISBN", "Title", "Author", "Available"};
-        model = new DefaultTableModel(cols, 0);
-        table = new JTable(model);
-        refreshTable();
+        tbl.setRowHeight(Math.max(22, COVER_H));
+        tbl.getColumnModel().getColumn(0).setPreferredWidth(60);
+        tbl.getColumnModel().getColumn(1).setPreferredWidth(70);
+        tbl.getColumnModel().getColumn(2).setPreferredWidth(110);
+        add(new JScrollPane(tbl), BorderLayout.CENTER);
 
-        add(new JScrollPane(table), BorderLayout.CENTER);
+        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        bottom.add(btAdd); bottom.add(btEdit); bottom.add(btDelete);
+        bottom.add(new JLabel(" | "));
+        bottom.add(btAddCopy); bottom.add(btCopies);
+        bottom.add(btAvail); bottom.add(btLost); bottom.add(btDamage); bottom.add(btRetire);
+        add(bottom, BorderLayout.SOUTH);
+
+        // events
+        btSearch.addActionListener(e -> load());
+        btAdd.addActionListener(e -> onAdd());
+        btEdit.addActionListener(e -> onEdit());
+        btDelete.addActionListener(e -> onDelete());
+        btAddCopy.addActionListener(e -> onAddCopiesPrompt());
+        btCopies.addActionListener(e -> onViewCopies());
+        btAvail.addActionListener(e -> changeStatus("AVAILABLE"));
+        btLost.addActionListener(e -> changeStatus("LOST"));
+        btDamage.addActionListener(e -> changeStatus("DAMAGED"));
+        btRetire.addActionListener(e -> changeStatus("RETIRED"));
+
+        // menu chuột phải
+        var pm = new JPopupMenu();
+        JMenuItem miEdit   = new JMenuItem("Edit Book");
+        JMenuItem miDel    = new JMenuItem("Delete Book");
+        JMenuItem miAdd    = new JMenuItem("Add Copies…");
+        JMenuItem miView   = new JMenuItem("View Copies");
+        JMenuItem miAvail  = new JMenuItem("Mark Available");
+        JMenuItem miLost   = new JMenuItem("Mark Lost");
+        JMenuItem miDam    = new JMenuItem("Mark Damaged");
+        JMenuItem miRet    = new JMenuItem("Retire");
+        miEdit.addActionListener(e -> onEdit());
+        miDel.addActionListener(e -> onDelete());
+        miAdd.addActionListener(e -> onAddCopiesPrompt());
+        miView.addActionListener(e -> onViewCopies());
+        miAvail.addActionListener(e -> changeStatus("AVAILABLE"));
+        miLost.addActionListener(e -> changeStatus("LOST"));
+        miDam.addActionListener(e -> changeStatus("DAMAGED"));
+        miRet.addActionListener(e -> changeStatus("RETIRED"));
+        pm.add(miEdit); pm.add(miDel); pm.addSeparator();
+        pm.add(miAdd); pm.add(miView); pm.addSeparator();
+        pm.add(miAvail); pm.add(miLost); pm.add(miDam); pm.add(miRet);
+
+        tbl.setComponentPopupMenu(pm);
+
+        load();
     }
 
-    private void refreshTable() {
-        model.setRowCount(0);
-        for (Books b : books) {
-            model.addRow(new Object[]{
-                    b.getCallNumber(), b.getISBN(), b.getTitle(),
-                    b.getAuthor(), b.isAvailable() ? "Yes" : "No"
-            });
-        }
+    private void load() {
+        try {
+            model.setRowCount(0);
+            List<Map<String,Object>> rows = bookDAO.searchWithAvailability(
+                nv(tfIsbn.getText()), nv(tfAuthor.getText()), nv(tfTitle.getText()), 1, 20);
+            for (Map<String,Object> r : rows) addRowAndLoadCover(r);
+        } catch (Exception ex) { show(ex); }
     }
 
-    public void searchBook(String callNumber) {
-        for (int i = 0; i < model.getRowCount(); i++) {
-            if (model.getValueAt(i, 0).toString().equalsIgnoreCase(callNumber)) {
-                table.setRowSelectionInterval(i, i);
-                table.scrollRectToVisible(table.getCellRect(i, 0, true));
+    private void onAdd() {
+        Books b = BookDialog.show(null, subjectDAO);
+        if (b == null) return;
+        try {
+            long id = bookDAO.insertAuto(b);
+            JOptionPane.showMessageDialog(this, "Created BookID=" + id);
+            load();
+        } catch (Exception ex) { show(ex); }
+    }
+
+    private void onEdit() {
+        int r = tbl.getSelectedRow();
+        if (r<0){ msg("Select a book"); return; }
+        long bookId = ((Number)model.getValueAt(r,0)).longValue();
+        String oldTitle  = (String)model.getValueAt(r,3);
+        String oldAuthor = (String)model.getValueAt(r,4);
+
+        Books b = BookDialog.show(bookId, subjectDAO);
+        if (b==null) return;
+
+        boolean rename = !oldTitle.equals(b.title) || !oldAuthor.equals(b.author);
+        try { bookDAO.update(b, rename); load(); }
+        catch (Exception ex){ show(ex); }
+    }
+
+    private void onDelete() {
+        int r = tbl.getSelectedRow();
+        if (r<0){ msg("Select a book"); return; }
+        long id = ((Number)model.getValueAt(r,0)).longValue();
+        if (JOptionPane.showConfirmDialog(this,"Delete this book?","Confirm",
+            JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) return;
+        try {
+            boolean ok = bookDAO.deleteIfNoCopies(id);
+            if (!ok) msg("Cannot delete: book still has copies");
+            load();
+        } catch (Exception ex){ show(ex); }
+    }
+
+    /** Prompt số lượng rồi tạo copies. */
+    private void onAddCopiesPrompt() {
+        int r = tbl.getSelectedRow();
+        if (r<0){ msg("Select a book"); return; }
+        long bookId = ((Number)model.getValueAt(r,0)).longValue();
+
+        String s = JOptionPane.showInputDialog(this, "Number of copies to add:", "1");
+        if (s == null) return;
+        int n;
+        try { n = Integer.parseInt(s.trim()); }
+        catch (Exception ex){ msg("Invalid number"); return; }
+        if (n <= 0) return;
+
+        try {
+            if (n == 1) {
+                BookCopy cp = copyDAO.insertAuto(bookId);
+                msg("New copy: " + cp.callNumber);
+            } else {
+                int created = copyDAO.insertMany(bookId, n);
+                msg("Added " + created + " copies.");
+            }
+            load();
+        } catch (Exception ex){ show(ex); }
+    }
+
+    private void onViewCopies() {
+        int r = tbl.getSelectedRow();
+        if (r<0){ msg("Select a book"); return; }
+        long bookId = ((Number)model.getValueAt(r,0)).longValue();
+        CopyManagerDialog.show(this, bookId, copyDAO, this::load);
+    }
+
+    private void changeStatus(String status) {
+        int r = tbl.getSelectedRow();
+        if (r<0){ msg("Select a book"); return; }
+        long bookId = ((Number)model.getValueAt(r,0)).longValue();
+        try {
+            // chọn bản sao cần đổi trạng thái
+            List<BookCopy> list = copyDAO.findByBook(bookId);
+            BookCopy chosen = CopyPicker.pick(this, list);
+            if (chosen==null) return;
+            if ("AVAILABLE".equals(status) && "RETIRED".equalsIgnoreCase(chosen.status)) {
+                msg("A retired copy cannot be made available again.");
                 return;
             }
-        }
-        JOptionPane.showMessageDialog(this, "No book found with CallNumber: " + callNumber);
+            copyDAO.changeStatus(chosen.copyId, status);
+            load();
+        } catch (Exception ex){ show(ex); }
+    }
+
+    /** Quick search theo CallNumber (prefix) – dùng cho ô bên trái sidebar. */
+    public void searchBook(String callNumber) {
+        try {
+            model.setRowCount(0);
+            List<Map<String,Object>> rows =
+                bookDAO.searchByCallNumberWithAvailability(nv(callNumber), 1, 20);
+            for (Map<String,Object> r : rows) addRowAndLoadCover(r);
+        } catch (Exception ex) { show(ex); }
+    }
+
+    // ---- Helpers ----
+    private static String nv(String s) { return (s == null || s.isBlank()) ? null : s.trim(); }
+
+    private void show(Exception ex){
+        ex.printStackTrace();
+        JOptionPane.showMessageDialog(this, ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+    }
+    private void msg(String s){ JOptionPane.showMessageDialog(this, s); }
+
+    private void addRowAndLoadCover(Map<String,Object> r) {
+        model.addRow(new Object[]{
+            r.get("BookID"), /*Cover*/ null,
+            r.get("ISBN"), r.get("Title"), r.get("Author"), r.get("Price"),
+            r.get("TotalCopies"), r.get("AvailableCopies")
+        });
+        int row = model.getRowCount()-1;
+        loadCoverAsync(row, (String) r.get("ImageURL"));
+    }
+
+    private void loadCoverAsync(int row, String url) {
+        if (url == null || url.isBlank()) return;
+        ImageIcon cached = coverCache.get(url);
+        if (cached != null) { model.setValueAt(cached, row, 1); return; }
+        new SwingWorker<ImageIcon,Void>(){
+            @Override protected ImageIcon doInBackground() {
+                try {
+                    BufferedImage img;
+                    if (url.matches("(?i)^https?://.*")) img = ImageIO.read(new URL(url));
+                    else img = ImageIO.read(new File(url));
+                    if (img == null) return null;
+                    Image scaled = img.getScaledInstance(COVER_W, COVER_H, Image.SCALE_SMOOTH);
+                    return new ImageIcon(scaled);
+                } catch (Exception ignore) { return null; }
+            }
+            @Override protected void done() {
+                try {
+                    ImageIcon icon = get();
+                    if (icon != null) {
+                        coverCache.put(url, icon);
+                        if (row >= 0 && row < model.getRowCount()) model.setValueAt(icon, row, 1);
+                    }
+                } catch (Exception ignore) {}
+            }
+        }.execute();
     }
 }
