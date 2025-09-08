@@ -54,6 +54,10 @@ public class MainFrame extends JFrame {
         getContentPane().setLayout(new BorderLayout());
         getContentPane().add(sidebar, BorderLayout.WEST);
         getContentPane().add(content, BorderLayout.CENTER);
+        
+        pack();                          
+        setMinimumSize(getSize());
+        setExtendedState(JFrame.MAXIMIZED_BOTH); 
 
         // ==== Actions ====
         btnBooks.addActionListener(e -> setContent(new BookForm()));
