@@ -4,14 +4,15 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.KeyEvent;
 
+import Util.Session;
+
 public class MainFrame extends JFrame {
     private JPanel sidebar;
     private JPanel content;
     private JTextField txtSearch;
 
     public MainFrame() {
-        setTitle("Library Manager System");
-        setExtendedState(JFrame.MAXIMIZED_BOTH);
+        super("Library Manager System");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
         // ==== MENU BAR ====
@@ -20,17 +21,22 @@ public class MainFrame extends JFrame {
         // ==== Sidebar ====
         sidebar = new JPanel();
         sidebar.setLayout(new BoxLayout(sidebar, BoxLayout.Y_AXIS));
-        sidebar.setPreferredSize(new Dimension(160, getHeight()));
+        sidebar.setPreferredSize(new Dimension(160, 1));
 
         JButton btnBooks      = new JButton("Books");
+        JButton btnPatrons    = new JButton("Patrons");
         JButton btnEmployees  = new JButton("Employees");
         JButton btnCheckIn    = new JButton("Check In");
         JButton btnCheckOut   = new JButton("Check Out");
         JButton btnTrans      = new JButton("Transactions");
         JButton btnLogout     = new JButton("Logout");
 
+        boolean isAdmin = "ADMIN".equalsIgnoreCase(Session.currentRole);
+
         sidebar.add(Box.createVerticalStrut(4));
         sidebar.add(btnBooks);
+        sidebar.add(btnPatrons);
+        btnEmployees.setVisible(isAdmin);      // chỉ ADMIN thấy nút Employees
         sidebar.add(btnEmployees);
         sidebar.add(btnCheckIn);
         sidebar.add(btnCheckOut);
@@ -51,21 +57,28 @@ public class MainFrame extends JFrame {
         content = new JPanel(new BorderLayout());
         setContent(new BookForm()); // mặc định mở Books
 
+        // ==== Root layout ====
         getContentPane().setLayout(new BorderLayout());
         getContentPane().add(sidebar, BorderLayout.WEST);
         getContentPane().add(content, BorderLayout.CENTER);
-        
-        pack();                          
+
+        // Kích thước & hiển thị
+        pack();
         setMinimumSize(getSize());
-        setExtendedState(JFrame.MAXIMIZED_BOTH); 
+        setExtendedState(JFrame.MAXIMIZED_BOTH);
 
         // ==== Actions ====
         btnBooks.addActionListener(e -> setContent(new BookForm()));
+        btnPatrons.addActionListener(e -> setContent(new PatronForm()));
         btnEmployees.addActionListener(e -> setContent(new EmployeeForm()));
         btnCheckIn.addActionListener(e -> setContent(new CheckInForm()));
         btnCheckOut.addActionListener(e -> setContent(new CheckOutForm()));
         btnTrans.addActionListener(e -> setContent(new TransactionForm()));
         btnLogout.addActionListener(e -> {
+            // clear session khi logout
+            Session.currentUserId   = null;
+            Session.currentUsername = null;
+            Session.currentRole     = null;
             dispose();
             new LoginFrame().setVisible(true);
         });
@@ -79,7 +92,7 @@ public class MainFrame extends JFrame {
         JMenuBar mb = new JMenuBar();
         int M = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
 
-        // File
+        // ===== File =====
         JMenu mFile = new JMenu("File");
         JMenuItem miLogout = new JMenuItem("Logout");
         JMenuItem miExit   = new JMenuItem("Exit");
@@ -90,7 +103,7 @@ public class MainFrame extends JFrame {
         mFile.addSeparator();
         mFile.add(miExit);
 
-        // Books
+        // ===== Books =====
         JMenu mBooks = new JMenu("Books");
         JMenuItem miBooks = new JMenuItem("Manage Books");
         miBooks.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_B, M));
@@ -104,7 +117,14 @@ public class MainFrame extends JFrame {
         mBooks.add(miBooks);
         mBooks.add(miSearchCall);
 
-        // Transactions
+        // ===== Users (Patrons) =====
+        JMenu mUsers = new JMenu("Users");
+        JMenuItem miPatrons = new JMenuItem("Patrons");
+        miPatrons.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_P, M));
+        miPatrons.addActionListener(e -> setContent(new PatronForm()));
+        mUsers.add(miPatrons);
+
+        // ===== Transactions =====
         JMenu mTrans = new JMenu("Transactions");
         JMenuItem miCheckIn  = new JMenuItem("Check In");
         JMenuItem miCheckOut = new JMenuItem("Check Out");
@@ -115,26 +135,32 @@ public class MainFrame extends JFrame {
         mTrans.add(miCheckIn);
         mTrans.add(miCheckOut);
 
-        // Admin
-        JMenu mAdmin = new JMenu("Admin");
-        JMenuItem miEmployees = new JMenuItem("Employees");
-        miEmployees.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_E, M));
-        miEmployees.addActionListener(e -> setContent(new EmployeeForm()));
-        mAdmin.add(miEmployees);
-
-        // Help
+        // ===== Help =====
         JMenu mHelp = new JMenu("Help");
         JMenuItem miAbout = new JMenuItem("About");
         miAbout.addActionListener(e ->
             JOptionPane.showMessageDialog(this,
-                "Library Manager System\n© Your Team", "About",
-                JOptionPane.INFORMATION_MESSAGE));
+                "Library Manager System\n© Your Team",
+                "About", JOptionPane.INFORMATION_MESSAGE));
         mHelp.add(miAbout);
 
+        // Add theo thứ tự
         mb.add(mFile);
         mb.add(mBooks);
+        mb.add(mUsers);
         mb.add(mTrans);
-        mb.add(mAdmin);
+
+        // ===== Admin (chỉ thêm nếu là ADMIN) =====
+        boolean isAdmin = "ADMIN".equalsIgnoreCase(Session.currentRole);
+        if (isAdmin) {
+            JMenu mAdmin = new JMenu("Admin");
+            JMenuItem miEmployees = new JMenuItem("Employees");
+            miEmployees.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_E, M));
+            miEmployees.addActionListener(e -> setContent(new EmployeeForm()));
+            mAdmin.add(miEmployees);
+            mb.add(mAdmin);
+        }
+
         mb.add(mHelp);
         return mb;
     }
