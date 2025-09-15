@@ -1,6 +1,8 @@
+/.DS_Store
+/App.class
 /DAO/
 /Lib/
-/Resources/
-/Util/
 /Model/
+/Resources/
 /UI/
+/Util/

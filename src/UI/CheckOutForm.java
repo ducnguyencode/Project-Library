@@ -1,76 +1,183 @@
 package UI;
 
-import Model.Books;
-import Model.Employee;
-import Model.Transaction;
+import DAO.LoanTicketDAO;
+import Util.DB;
+import Util.Session;
 
 import javax.swing.*;
+import javax.swing.border.EmptyBorder;
 import java.awt.*;
-import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.UUID;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyAdapter;
+import java.awt.event.KeyEvent;
+import java.sql.Connection;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
+import java.util.stream.Collectors;
 
 public class CheckOutForm extends JPanel {
-    private JTextField txtEmployeeId, txtCallNumber;
-    private JButton btnCheckOut;
-    private JTextArea txtResult;
 
-    // Mock data lists 
-    private ArrayList<Books> books;
-    private ArrayList<Employee> employees;
-    private ArrayList<Transaction> transactions;
+    private JTextField txtEmployee;     // read-only: current user
+    private JTextField txtPatronId;     // input: Patron ID (student)
+    private JTextArea  txtCalls;        // one call number per line
+    private JTextArea  txtResult;       // output area
+    private JButton    btnCheckOut;
+    private JButton    btnClear;
 
     public CheckOutForm() {
+        buildUI();
+        bindEvents();
+        loadSessionUser();
+    }
+
+    private void buildUI() {
         setLayout(new BorderLayout());
+        setBorder(new EmptyBorder(10, 10, 10, 10));
 
-        books = TransactionMockData.getBooks();
-        employees = TransactionMockData.getEmployees();
-        transactions = TransactionMockData.getTransactions();
+        JPanel top = new JPanel(new GridBagLayout());
+        top.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        GridBagConstraints g = new GridBagConstraints();
+        Insets insets = new Insets(6, 6, 6, 6);
+        g.insets = insets;
+        g.anchor = GridBagConstraints.WEST;
 
-        JPanel form = new JPanel(new GridLayout(3, 2, 10, 10));
-        form.add(new JLabel("Employee ID:"));
-        txtEmployeeId = new JTextField();
-        form.add(txtEmployeeId);
+        // Employee (read-only)
+        g.gridx = 0; g.gridy = 0;
+        top.add(new JLabel("Employee:"), g);
+        txtEmployee = new JTextField(18);
+        txtEmployee.setEditable(false);
+        g.gridx = 1; g.gridy = 0; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1;
+        top.add(txtEmployee, g);
 
-        form.add(new JLabel("Book CallNumber:"));
-        txtCallNumber = new JTextField();
-        form.add(txtCallNumber);
+        // Patron ID (input)
+        g.gridx = 0; g.gridy = 1; g.fill = GridBagConstraints.NONE; g.weightx = 0;
+        top.add(new JLabel("Patron ID:"), g);
+        txtPatronId = new JTextField(18);
+        g.gridx = 1; g.gridy = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1;
+        top.add(txtPatronId, g);
 
+        // Call numbers
+        g.gridx = 0; g.gridy = 2;
+        top.add(new JLabel("CallNumbers (one per line):"), g);
+        txtCalls = new JTextArea(8, 60);
+        txtCalls.setLineWrap(false);
+        JScrollPane spCalls = new JScrollPane(txtCalls);
+        g.gridx = 1; g.gridy = 2; g.gridwidth = 1; g.fill = GridBagConstraints.BOTH; g.weightx = 1; g.weighty = 1;
+        top.add(spCalls, g);
+
+        // Buttons
+        JPanel btns = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         btnCheckOut = new JButton("Check Out");
-        btnCheckOut.addActionListener(e -> doCheckOut());
-        form.add(new JLabel());
-        form.add(btnCheckOut);
+        btnClear    = new JButton("Clear");
+        btns.add(btnCheckOut);
+        btns.add(btnClear);
+        g.gridx = 1; g.gridy = 3; g.weightx = 0; g.weighty = 0; g.fill = GridBagConstraints.NONE;
+        top.add(btns, g);
 
-        txtResult = new JTextArea(5, 30);
+        add(top, BorderLayout.NORTH);
+
+        // Result area
+        txtResult = new JTextArea(14, 120);
         txtResult.setEditable(false);
-
-        add(form, BorderLayout.NORTH);
+        txtResult.setLineWrap(false);
         add(new JScrollPane(txtResult), BorderLayout.CENTER);
     }
 
-    private void doCheckOut() {
-        String empId = txtEmployeeId.getText().trim();
-        String callNo = txtCallNumber.getText().trim();
+    private void bindEvents() {
+        // Enter in Patron text triggers checkout if there are calls
+        txtPatronId.addActionListener(this::doCheckout);
 
-        Employee emp = employees.stream().filter(e -> e.getEmployeeID().equals(empId)).findFirst().orElse(null);
-        if (emp == null) {
-            JOptionPane.showMessageDialog(this, "Employee not found!");
+        // Press Enter while focus in calls area: run checkout (if Ctrl not down)
+        txtCalls.addKeyListener(new KeyAdapter() {
+            @Override public void keyPressed(KeyEvent e) {
+                if (!e.isControlDown() && e.getKeyCode() == KeyEvent.VK_ENTER) {
+                    doCheckout(null);
+                }
+            }
+        });
+
+        btnCheckOut.addActionListener(this::doCheckout);
+        btnClear.addActionListener(e -> {
+            txtCalls.setText("");
+            txtResult.setText("");
+            txtPatronId.requestFocus();
+        });
+    }
+
+    private void loadSessionUser() {
+        // Show username (or "Admin") read-only
+        String name = Session.currentUsername;
+        if (name == null || name.isBlank()) name = "Admin";
+        txtEmployee.setText(name);
+        txtEmployee.setCaretPosition(0);
+        txtEmployee.setEditable(false);
+        // Make text field look disabled but readable
+        txtEmployee.setBackground(UIManager.getColor("TextField.inactiveBackground"));
+    }
+
+    private List<String> parseCalls() {
+        return Arrays.stream(txtCalls.getText().split("\\R"))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+    }
+
+    private void doCheckout(ActionEvent e) {
+        String patronId = txtPatronId.getText().trim();
+        List<String> calls = parseCalls();
+
+        if (patronId.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Please enter Patron ID", "Error", JOptionPane.ERROR_MESSAGE);
+            txtPatronId.requestFocus();
+            return;
+        }
+        if (calls.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Please enter at least one CallNumber", "Error", JOptionPane.ERROR_MESSAGE);
+            txtCalls.requestFocus();
             return;
         }
 
-        Books book = books.stream().filter(b -> b.getCallNumber().equals(callNo)).findFirst().orElse(null);
-        if (book == null || !book.isAvailable()) {
-            JOptionPane.showMessageDialog(this, "Book not available!");
-            return;
+        try (Connection conn = DB.get()) {
+            LoanTicketDAO dao = new LoanTicketDAO(conn);
+            long userId = Session.currentUserId; // <-- dùng Session
+            LoanTicketDAO.CheckoutResult res = dao.checkoutMany(calls, patronId, userId);
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("CHECK-OUT SUCCESS\n");
+            sb.append("PatronSysId : ").append(res.patronSysId).append("\n");
+            sb.append("Items      : ").append(res.itemCount).append("\n");
+            sb.append("IssueDate  : ").append(res.issueDate).append("\n");
+            sb.append("DueDate    : ").append(res.dueDate).append("\n");
+
+            if (res.checked != null && !res.checked.isEmpty()) {
+                sb.append("Checked    : ").append(String.join(", ", res.checked)).append("\n");
+            }
+            if (res.skipped != null && !res.skipped.isEmpty()) {
+                sb.append("Skipped    : ").append(String.join(", ", res.skipped)).append("\n");
+            }
+
+            txtResult.setText(sb.toString());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
         }
+    }
 
-        LocalDate issueDate = LocalDate.now();
-        LocalDate dueDate = issueDate.plusDays(5);
+    // quick runner for standalone test
+    public static void main(String[] args) {
+        try {
+            for (UIManager.LookAndFeelInfo i : UIManager.getInstalledLookAndFeels()) {
+                if (Objects.equals("Nimbus", i.getName())) { UIManager.setLookAndFeel(i.getClassName()); break; }
+            }
+        } catch (Exception ignore) {}
 
-        Transaction t = new Transaction(UUID.randomUUID().toString(), emp, book, issueDate, dueDate);
-        transactions.add(t);
-        book.setAvailable(false);
-
-        txtResult.append("Book Checked Out!\n" + t + "\n\n");
+        SwingUtilities.invokeLater(() -> {
+            JFrame f = new JFrame("Check-out");
+            f.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            f.setContentPane(new CheckOutForm());
+            f.pack();
+            f.setLocationRelativeTo(null);
+            f.setVisible(true);
+        });
     }
 }
