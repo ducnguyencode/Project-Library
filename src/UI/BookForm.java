@@ -6,6 +6,7 @@ import DAO.BookCopyDAO;
 import DAO.SubjectDAO;
 import Model.Books;
 import Model.BookCopy;
+import Util.Session;
 
 import javax.imageio.ImageIO;
 import javax.swing.*;
@@ -43,6 +44,9 @@ public class BookForm extends JPanel {
     private final JButton btDelete  = new JButton("Delete Book");
     private final JButton btAddCopy = new JButton("Add Copy");
     private final JButton btCopies  = new JButton("View Copies");
+    private final JButton btDetails = new JButton("Details");
+    private final JButton btAddToCart = new JButton("Add to Cart");
+    private final JButton btOpenCart = new JButton("Cart...");
     private final JButton btAvail   = new JButton("Mark Available");
     private final JButton btLost    = new JButton("Mark Lost");
     private final JButton btDamage  = new JButton("Mark Damaged");
@@ -82,7 +86,9 @@ public class BookForm extends JPanel {
         JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         bottom.add(btAdd); bottom.add(btEdit); bottom.add(btDelete);
         bottom.add(new JLabel(" | "));
-        bottom.add(btAddCopy); bottom.add(btCopies);
+        bottom.add(btAddCopy); bottom.add(btCopies); bottom.add(btDetails);
+        bottom.add(btAddToCart); bottom.add(btOpenCart);
+        bottom.add(new JLabel(" | "));
         bottom.add(btAvail);
         bottom.add(btLost); bottom.add(btDamage); bottom.add(btRetire);
         add(bottom, BorderLayout.SOUTH);
@@ -95,6 +101,9 @@ public class BookForm extends JPanel {
         btDelete.addActionListener(e -> onDelete());
         btAddCopy.addActionListener(e -> onAddCopy());
         btCopies.addActionListener(e -> onViewCopies());
+        btDetails.addActionListener(e -> onDetails());
+        btAddToCart.addActionListener(e -> onAddToCart());
+        btOpenCart.addActionListener(e -> onOpenCart());
 
         btAvail.addActionListener(e -> changeStatus("AVAILABLE"));
         btLost .addActionListener(e -> changeStatus("LOST"));
@@ -135,8 +144,8 @@ public class BookForm extends JPanel {
         if (JOptionPane.showConfirmDialog(this,"Delete this book?","Confirm",
                 JOptionPane.OK_CANCEL_OPTION) != JOptionPane.OK_OPTION) return;
         try {
-            boolean ok = bookDAO.deleteIfNoCopies(id);
-            if (!ok) msg("Cannot delete: book still has copies");
+            boolean ok = bookDAO.deleteIfNeverIssued(id);
+            if (!ok) msg("Cannot delete: this title has been issued before or has open loans.");
             load();
         } catch (Exception ex){ show(ex); }
     }
@@ -151,8 +160,55 @@ public class BookForm extends JPanel {
 
         int ok = 0, fail = 0;
         for (int i=0;i<n;i++) { try { copyDAO.insertAuto(bookId); ok++; } catch (Exception ex){ fail++; } }
-        msg("Added: "+ok+(fail>0?(" | Failed: "+fail):"")); load();
+        msg("Added: "+ok+(fail>0?(" | Failed: "+fail):""));
+        load();
     }
+
+
+    private void onDetails() {
+        int r = tbl.getSelectedRow(); if (r<0){ msg("Select a book"); return; }
+        long bookId = (long)model.getValueAt(r,0);
+        Window w = SwingUtilities.getWindowAncestor(this);
+        new BookDetailDialog(w, bookId).setVisible(true);
+    }
+
+    private void onAddToCart() {
+        int[] sel = tbl.getSelectedRows();
+        if (sel==null || sel.length==0){ msg("Select at least one book"); return; }
+        try {
+            if (sel.length==1) {
+                long bookId = (long)model.getValueAt(sel[0],0);
+                java.util.List<BookCopy> list = new DAO.BookCopyDAO().findByBook(bookId);
+                java.util.List<BookCopy> preferred = new ArrayList<>();
+                for (BookCopy c : list) if (c.isAvailable && "AVAILABLE".equals(c.status)) preferred.add(c);
+                if (preferred.isEmpty()) preferred = list;
+                BookCopy chosen = CopyPicker.pick(this, preferred);
+                if (chosen==null) return;
+                Session.cartAdd(chosen.callNumber);
+                msg("Added to cart: " + chosen.callNumber + " (total " + Session.cartSize() + ")");
+            } else {
+                int added=0, skipped=0;
+                for (int r : sel) {
+                    try {
+                        long bookId = (long)model.getValueAt(r,0);
+                        java.util.List<BookCopy> list = new DAO.BookCopyDAO().findByBook(bookId);
+                        BookCopy pick = null;
+                        for (BookCopy c : list) if (c.isAvailable && "AVAILABLE".equals(c.status)) { pick=c; break; }
+                        if (pick==null && !list.isEmpty()) pick = list.get(0);
+                        if (pick!=null) { Session.cartAdd(pick.callNumber); added++; }
+                        else skipped++;
+                    } catch (Exception ignore){ skipped++; }
+                }
+                msg("Added: "+added+(skipped>0?(" | Skipped: "+skipped):"")+" | Cart: "+Session.cartSize());
+            }
+        } catch (Exception ex){ show(ex); }
+    }
+
+    private void onOpenCart() {
+        Window w = SwingUtilities.getWindowAncestor(this);
+        new CartDialog(w).setVisible(true);
+    }
+
 
     private void onViewCopies() {
         int r = tbl.getSelectedRow(); if (r<0){ msg("Select a book"); return; }
@@ -178,6 +234,8 @@ public class BookForm extends JPanel {
         JMenuItem miDelete = new JMenuItem("Delete Book");
         JMenuItem miAdd    = new JMenuItem("Add Copy");
         JMenuItem miView   = new JMenuItem("View Copies");
+        JMenuItem miDetails= new JMenuItem("Details");
+        JMenuItem miAddCart= new JMenuItem("Add to Cart");
         JMenuItem miAvail  = new JMenuItem("Mark Available");
         JMenuItem miLost   = new JMenuItem("Mark Lost");
         JMenuItem miDam    = new JMenuItem("Mark Damaged");
@@ -186,12 +244,14 @@ public class BookForm extends JPanel {
         miDelete.addActionListener(e -> onDelete());
         miAdd.addActionListener(e -> onAddCopy());
         miView.addActionListener(e -> onViewCopies());
+        miDetails.addActionListener(e -> onDetails());
+        miAddCart.addActionListener(e -> onAddToCart());
         miAvail.addActionListener(e -> changeStatus("AVAILABLE"));
         miLost.addActionListener(e -> changeStatus("LOST"));
         miDam.addActionListener(e -> changeStatus("DAMAGED"));
         miRet.addActionListener(e -> changeStatus("RETIRED"));
         pm.add(miEdit); pm.add(miDelete); pm.addSeparator();
-        pm.add(miAdd); pm.add(miView); pm.addSeparator();
+        pm.add(miAdd); pm.add(miView); pm.add(miDetails); pm.add(miAddCart); pm.addSeparator();
         pm.add(miAvail); pm.add(miLost); pm.add(miDam); pm.add(miRet);
         return pm;
     }

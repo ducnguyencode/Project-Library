@@ -1,57 +1,98 @@
 package UI;
 
-import Model.Books;
-import Model.Transaction;
+import DAO.LoanTicketDAO;
+import Util.DB;
+import Util.Session;
 
 import javax.swing.*;
 import java.awt.*;
-import java.time.LocalDate;
-import java.util.ArrayList;
+import java.sql.Connection;
+import java.util.List;
 
 public class CheckInForm extends JPanel {
-    private JTextField txtCallNumber;
+    private JTextArea txtCalls;
     private JButton btnCheckIn;
     private JTextArea txtResult;
-
-    private ArrayList<Books> books;
-    private ArrayList<Transaction> transactions;
+    private JButton btnPick;
+    private JButton btnPaste;
 
     public CheckInForm() {
         setLayout(new BorderLayout());
 
-        books = TransactionMockData.getBooks();
-        transactions = new ArrayList<>();
+        JPanel form = new JPanel(new GridBagLayout());
+        GridBagConstraints g = new GridBagConstraints();
+        g.insets = new Insets(6,6,6,6);
+        g.anchor = GridBagConstraints.WEST;
 
-        JPanel form = new JPanel(new GridLayout(2, 2, 10, 10));
-        form.add(new JLabel("Book CallNumber:"));
-        txtCallNumber = new JTextField();
-        form.add(txtCallNumber);
+        g.gridx=0; g.gridy=0; form.add(new JLabel("Book CallNumber(s) (one per line):"), g);
+        txtCalls = new JTextArea(6, 60);
+        JScrollPane sp = new JScrollPane(txtCalls);
+        g.gridx=1; g.gridy=0; g.fill=GridBagConstraints.BOTH; g.weightx=1; g.weighty=1; form.add(sp, g);
 
+        JPanel btns = new JPanel(new FlowLayout(FlowLayout.LEFT));
         btnCheckIn = new JButton("Check In");
-        btnCheckIn.addActionListener(e -> doCheckIn());
-        form.add(new JLabel());
-        form.add(btnCheckIn);
+        btnPick    = new JButton("Pick...");
+        btnPaste   = new JButton("Paste");
+        btns.add(btnCheckIn); btns.add(btnPick); btns.add(btnPaste);
+        g.gridx=1; g.gridy=1; g.fill=GridBagConstraints.NONE; g.weightx=0; g.weighty=0; form.add(btns, g);
 
-        txtResult = new JTextArea(5, 30);
+        txtResult = new JTextArea(10, 80);
         txtResult.setEditable(false);
 
         add(form, BorderLayout.NORTH);
         add(new JScrollPane(txtResult), BorderLayout.CENTER);
+
+        // events
+        btnCheckIn.addActionListener(e -> doCheckIn());
+        btnPick.addActionListener(e -> onPick());
+        btnPaste.addActionListener(e -> onPaste());
     }
 
     private void doCheckIn() {
-        String callNo = txtCallNumber.getText().trim();
+        String raw = txtCalls.getText().trim();
+        if (raw.isEmpty()) { JOptionPane.showMessageDialog(this, "Enter one or more CallNumbers (one per line)"); return; }
+        List<String> calls = java.util.Arrays.stream(raw.split("\\R"))
+                .map(String::trim).filter(s->!s.isEmpty()).toList();
 
-        for (Transaction t : transactions) {
-            if (t.getBook().getCallNumber().equals(callNo) && t.getReturnDate() == null) {
-                t.returnBook(LocalDate.now());
-                t.getBook().setAvailable(true);
+        try (Connection c = DB.get()) {
+            LoanTicketDAO dao = new LoanTicketDAO(c);
+            long userId = Session.currentUserId;
+            LoanTicketDAO.CheckinResult res = dao.checkinMany(calls, userId);
 
-                txtResult.append("Book Checked In!\n" + t + "\n\n");
-                return;
-            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("CHECK-IN RESULT\n");
+            sb.append("Checked : ").append(res.itemCount).append("\n");
+            sb.append("Total Late Fees: ").append(res.totalLateFees).append("\n");
+            if (!res.checked.isEmpty()) sb.append("Checked Items: ").append(String.join(", ", res.checked)).append("\n");
+            if (!res.skipped.isEmpty()) sb.append("Skipped: ").append(String.join(", ", res.skipped)).append("\n");
+
+            txtResult.setText(sb.toString());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            ex.printStackTrace();
         }
+    }
 
-        JOptionPane.showMessageDialog(this, "No active transaction for this book!");
+    private void onPick() {
+        Window w = SwingUtilities.getWindowAncestor(this);
+        List<String> calls = OpenLoansDialog.pick(w);
+        if (calls==null || calls.isEmpty()) return;
+        String s = String.join("\n", calls);
+        if (!txtCalls.getText().isBlank()) s = "\n"+s;
+        txtCalls.append(s);
+        txtCalls.requestFocus();
+    }
+
+    private void onPaste() {
+        try {
+            var cb = Toolkit.getDefaultToolkit().getSystemClipboard();
+            var data = cb.getData(java.awt.datatransfer.DataFlavor.stringFlavor);
+            if (data != null) {
+                String s = data.toString().replace("\r\n","\n").replace('\r','\n');
+                if (!txtCalls.getText().isBlank()) s = "\n" + s;
+                txtCalls.append(s);
+                txtCalls.requestFocus();
+            }
+        } catch (Exception ex) { JOptionPane.showMessageDialog(this, ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE); }
     }
 }

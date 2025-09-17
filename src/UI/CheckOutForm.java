@@ -1,6 +1,8 @@
 package UI;
 
 import DAO.LoanTicketDAO;
+import DAO.BorrowRecordDAO;
+import DAO.LibSettingsDAO;
 import Util.DB;
 import Util.Session;
 
@@ -24,11 +26,18 @@ public class CheckOutForm extends JPanel {
     private JTextArea  txtResult;       // output area
     private JButton    btnCheckOut;
     private JButton    btnClear;
+    private JButton    btnLoadCart;
+    private JButton    btnPaste;
+    private JButton    btnPickPatron;
+    private JLabel     lblQuota;         // remaining borrow slots for patron
 
     public CheckOutForm() {
         buildUI();
         bindEvents();
         loadSessionUser();
+        if (Session.cartSize() > 0) {
+            loadCartIntoText();
+        }
     }
 
     private void buildUI() {
@@ -50,12 +59,20 @@ public class CheckOutForm extends JPanel {
         g.gridx = 1; g.gridy = 0; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1;
         top.add(txtEmployee, g);
 
-        // Patron ID (input)
+        // Patron ID (input) + picker
         g.gridx = 0; g.gridy = 1; g.fill = GridBagConstraints.NONE; g.weightx = 0;
         top.add(new JLabel("Patron ID:"), g);
+        JPanel patronLine = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         txtPatronId = new JTextField(18);
+        btnPickPatron = new JButton("Pick...");
+        lblQuota = new JLabel(" ");
+        lblQuota.setForeground(new Color(0, 102, 0));
+        patronLine.add(txtPatronId);
+        patronLine.add(btnPickPatron);
+        patronLine.add(Box.createHorizontalStrut(10));
+        patronLine.add(lblQuota);
         g.gridx = 1; g.gridy = 1; g.fill = GridBagConstraints.HORIZONTAL; g.weightx = 1;
-        top.add(txtPatronId, g);
+        top.add(patronLine, g);
 
         // Call numbers
         g.gridx = 0; g.gridy = 2;
@@ -70,10 +87,18 @@ public class CheckOutForm extends JPanel {
         JPanel btns = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         btnCheckOut = new JButton("Check Out");
         btnClear    = new JButton("Clear");
+        btnLoadCart = new JButton("Load Cart");
+        btnPaste = new JButton("Paste");
+        JLabel hint = new JLabel("Tip: scan barcodes; Enter = new line, Ctrl+Enter = Check Out");
+        hint.setFont(hint.getFont().deriveFont(hint.getFont().getSize2D()-1f));
         btns.add(btnCheckOut);
         btns.add(btnClear);
+        btns.add(btnLoadCart);
+        btns.add(btnPaste);
         g.gridx = 1; g.gridy = 3; g.weightx = 0; g.weighty = 0; g.fill = GridBagConstraints.NONE;
         top.add(btns, g);
+        g.gridx = 1; g.gridy = 4; g.weightx = 0; g.weighty = 0; g.fill = GridBagConstraints.NONE;
+        top.add(hint, g);
 
         add(top, BorderLayout.NORTH);
 
@@ -88,10 +113,10 @@ public class CheckOutForm extends JPanel {
         // Enter in Patron text triggers checkout if there are calls
         txtPatronId.addActionListener(this::doCheckout);
 
-        // Press Enter while focus in calls area: run checkout (if Ctrl not down)
+        // Calls area: Ctrl+Enter = checkout; Enter = newline (default)
         txtCalls.addKeyListener(new KeyAdapter() {
             @Override public void keyPressed(KeyEvent e) {
-                if (!e.isControlDown() && e.getKeyCode() == KeyEvent.VK_ENTER) {
+                if (e.isControlDown() && e.getKeyCode() == KeyEvent.VK_ENTER) {
                     doCheckout(null);
                 }
             }
@@ -103,6 +128,60 @@ public class CheckOutForm extends JPanel {
             txtResult.setText("");
             txtPatronId.requestFocus();
         });
+        btnLoadCart.addActionListener(e -> loadCartIntoText());
+
+        // Paste from clipboard to calls
+        btnPaste.addActionListener(e -> {
+            try {
+                var cb = Toolkit.getDefaultToolkit().getSystemClipboard();
+                var data = cb.getData(java.awt.datatransfer.DataFlavor.stringFlavor);
+                if (data != null) {
+                    String s = data.toString().replace("\r\n", "\n").replace('\r','\n');
+                    if (!txtCalls.getText().isBlank()) s = "\n" + s;
+                    txtCalls.append(s);
+                    txtCalls.requestFocus();
+                }
+            } catch (Exception ex) { JOptionPane.showMessageDialog(this, ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE); }
+        });
+
+        // Patron picker
+        btnPickPatron.addActionListener(e -> {
+            Window w = SwingUtilities.getWindowAncestor(this);
+            String sel = PatronPickerDialog.pick(w);
+            if (sel != null) { txtPatronId.setText(sel); updateQuota(); txtCalls.requestFocus(); }
+        });
+        // update quota when leaving Patron field
+        txtPatronId.addFocusListener(new java.awt.event.FocusAdapter(){
+            @Override public void focusLost(java.awt.event.FocusEvent e){ updateQuota(); }
+        });
+    }
+
+    private void updateQuota() {
+        String patronId = txtPatronId.getText().trim();
+        if (patronId.isEmpty()) { lblQuota.setText(" "); return; }
+        SwingUtilities.invokeLater(() -> {
+            try {
+                BorrowRecordDAO br = new BorrowRecordDAO();
+                int open = br.listOpenByPatron(patronId).size();
+                var settings = new LibSettingsDAO().getLatest();
+                int max = (settings!=null && settings.containsKey("MaxBooksPerPatron"))
+                        ? Integer.parseInt(String.valueOf(settings.get("MaxBooksPerPatron"))) : 0;
+                int remain = Math.max(0, max - open);
+                lblQuota.setText("Remaining: "+remain+" (Open: "+open+" / Max: "+max+")");
+                lblQuota.setForeground(remain>0? new Color(0,102,0) : new Color(178,34,34));
+            } catch (Exception ex) {
+                lblQuota.setText(" ");
+            }
+        });
+    }
+
+    private void loadCartIntoText() {
+        List<String> items = Session.cartItems();
+        if (items.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Cart is empty");
+        }
+        txtCalls.setText(String.join("\n", items));
+        if (!items.isEmpty()) txtCalls.setCaretPosition(txtCalls.getText().length());
     }
 
     private void loadSessionUser() {
@@ -110,6 +189,9 @@ public class CheckOutForm extends JPanel {
         String name = Session.currentUsername;
         if (name == null || name.isBlank()) name = "Admin";
         txtEmployee.setText(name);
+        // prefill last patron id if available
+        if (Session.getLastPatronId() != null) txtPatronId.setText(Session.getLastPatronId());
+        updateQuota();
         txtEmployee.setCaretPosition(0);
         txtEmployee.setEditable(false);
         // Make text field look disabled but readable
@@ -142,6 +224,8 @@ public class CheckOutForm extends JPanel {
             LoanTicketDAO dao = new LoanTicketDAO(conn);
             long userId = Session.currentUserId; // <-- dùng Session
             LoanTicketDAO.CheckoutResult res = dao.checkoutMany(calls, patronId, userId);
+            // remember this patron for next time
+            Session.setLastPatronId(patronId);
 
             StringBuilder sb = new StringBuilder();
             sb.append("CHECK-OUT SUCCESS\n");
@@ -152,12 +236,16 @@ public class CheckOutForm extends JPanel {
 
             if (res.checked != null && !res.checked.isEmpty()) {
                 sb.append("Checked    : ").append(String.join(", ", res.checked)).append("\n");
+                // remove checked items from cart
+                for (String c : res.checked) Session.cartRemove(c);
             }
             if (res.skipped != null && !res.skipped.isEmpty()) {
                 sb.append("Skipped    : ").append(String.join(", ", res.skipped)).append("\n");
             }
+            sb.append("Cart left  : ").append(Session.cartSize()).append(" item(s)\n");
 
             txtResult.setText(sb.toString());
+            updateQuota();
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
         }

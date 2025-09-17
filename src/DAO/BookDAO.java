@@ -115,6 +115,49 @@ public class BookDAO {
         }
     }
 
+    /**
+     * Xóa đầu sách nếu CHƯA TỪNG được phát hành (chưa có bản ghi trong BORROW_RECORDS).
+     * - Nếu chưa từng phát hành: xóa toàn bộ BOOK_COPIES thuộc sách này rồi xóa BOOKS.
+     * - Nếu đã từng phát hành (có lịch sử mượn) -> trả về false, không xóa.
+     */
+    public boolean deleteIfNeverIssued(long bookId) throws Exception {
+        try (Connection c = DB.get()) {
+            c.setAutoCommit(false);
+            try {
+                // 1) Kiểm tra đã từng có borrow record nào cho các bản sao của bookId chưa
+                String chk = "SELECT COUNT(*) " +
+                             "FROM BORROW_RECORDS br JOIN BOOK_COPIES c ON c.CopyID = br.CopyID " +
+                             "WHERE c.BookID = ?";
+                int cnt;
+                try (PreparedStatement ps = c.prepareStatement(chk)) {
+                    ps.setLong(1, bookId);
+                    try (ResultSet rs = ps.executeQuery()) { rs.next(); cnt = rs.getInt(1); }
+                }
+                if (cnt > 0) { c.rollback(); return false; }
+
+                // 2) Xóa toàn bộ bản sao (nếu có)
+                try (PreparedStatement delC = c.prepareStatement("DELETE FROM BOOK_COPIES WHERE BookID=?")) {
+                    delC.setLong(1, bookId);
+                    delC.executeUpdate();
+                }
+                // 3) Xóa đầu sách
+                try (PreparedStatement delB = c.prepareStatement("DELETE FROM BOOKS WHERE BookID=?")) {
+                    delB.setLong(1, bookId);
+                    delB.executeUpdate();
+                }
+
+                c.commit();
+                return true;
+            } catch (Exception ex) {
+                c.rollback();
+                throw ex;
+            } finally {
+                c.setAutoCommit(true);
+            }
+        }
+    }
+
+
  // Tìm kiếm + số bản sao (total/available), phân trang
     public List<Map<String,Object>> searchWithAvailability(
             String isbn, String author, String title,
@@ -217,6 +260,55 @@ public class BookDAO {
                 b.imageURL    = rs.getString("ImageURL");
                 return b;
             }
+        }
+    }
+
+    /** Header info for Book detail */
+    public Map<String,Object> getHeader(long bookId) throws Exception {
+        String sql = "SELECT BookID, ISBN, Title, Author FROM BOOKS WHERE BookID=?";
+        try (Connection c = DB.get(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, bookId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return null;
+                Map<String,Object> m = new LinkedHashMap<>();
+                m.put("BookID", rs.getLong("BookID"));
+                m.put("ISBN", rs.getString("ISBN"));
+                m.put("Title", rs.getString("Title"));
+                m.put("Author", rs.getString("Author"));
+                return m;
+            }
+        }
+    }
+
+    /**
+     * Copy status rows for Book detail (includes current borrower if out)
+     */
+    public List<Map<String,Object>> listCopyStatus(long bookId) throws Exception {
+        String sql = "SELECT c.CopyID, c.CallNumber, c.Status, c.IsAvailable, " +
+                     "       ls.IssueDate, br.DueDate, p.PatronID, p.Name AS PatronName " +
+                     "FROM BOOK_COPIES c " +
+                     "LEFT JOIN BORROW_RECORDS br ON br.CopyID = c.CopyID AND br.ReturnDate IS NULL " +
+                     "LEFT JOIN LOAN_SLIPS ls ON ls.SlipID = br.SlipID " +
+                     "LEFT JOIN PATRONS p ON p.PatronSysID = ls.PatronSysID " +
+                     "WHERE c.BookID=? ORDER BY c.CopySeq";
+        try (Connection c = DB.get(); PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, bookId);
+            List<Map<String,Object>> out = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    Map<String,Object> m = new LinkedHashMap<>();
+                    m.put("CopyID", rs.getLong("CopyID"));
+                    m.put("CallNumber", rs.getString("CallNumber"));
+                    m.put("Status", rs.getString("Status"));
+                    m.put("IsAvailable", rs.getBoolean("IsAvailable"));
+                    m.put("IssueDate", rs.getTimestamp("IssueDate"));
+                    m.put("DueDate", rs.getTimestamp("DueDate"));
+                    m.put("PatronID", rs.getString("PatronID"));
+                    m.put("PatronName", rs.getString("PatronName"));
+                    out.add(m);
+                }
+            }
+            return out;
         }
     }
 }

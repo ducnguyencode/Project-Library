@@ -128,12 +128,23 @@ public class MainFrame extends JFrame {
         JMenu mTrans = new JMenu("Transactions");
         JMenuItem miCheckIn  = new JMenuItem("Check In");
         JMenuItem miCheckOut = new JMenuItem("Check Out");
+        JMenuItem miCurrent  = new JMenuItem("Current Loans...");
+        JMenuItem miHistory  = new JMenuItem("Loan History...");
         miCheckIn.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_I, M));
         miCheckOut.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, M));
+        miCurrent.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_L, M));
+        miHistory.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_H, M));
         miCheckIn.addActionListener(e -> setContent(new CheckInForm()));
         miCheckOut.addActionListener(e -> setContent(new CheckOutForm()));
+        miCurrent.addActionListener(e -> OpenLoansDialog.showView(this));
+        miHistory.addActionListener(e -> LoanHistoryDialog.showView(this));
         mTrans.add(miCheckIn);
         mTrans.add(miCheckOut);
+        // permissions: Current Loans only LIBRARIAN; Loan History only ADMIN
+        boolean isLib = Session.currentRole != null && Session.currentRole.equalsIgnoreCase("LIBRARIAN");
+        boolean isAdminRole = Session.currentRole != null && Session.currentRole.equalsIgnoreCase("ADMIN");
+        if (isLib) mTrans.add(miCurrent);
+        if (isAdminRole) mTrans.add(miHistory);
 
         // ===== Help =====
         JMenu mHelp = new JMenu("Help");
@@ -157,7 +168,10 @@ public class MainFrame extends JFrame {
             JMenuItem miEmployees = new JMenuItem("Employees");
             miEmployees.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_E, M));
             miEmployees.addActionListener(e -> setContent(new EmployeeForm()));
+            JMenuItem miSettings = new JMenuItem("Library Settings...");
+            miSettings.addActionListener(e -> new SettingsDialog(this).setVisible(true));
             mAdmin.add(miEmployees);
+            mAdmin.add(miSettings);
             mb.add(mAdmin);
         }
 
