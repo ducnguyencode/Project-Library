@@ -28,7 +28,7 @@ public class MainFrame extends JFrame {
         JButton btnEmployees  = new JButton("Employees");
         JButton btnCheckIn    = new JButton("Check In");
         JButton btnCheckOut   = new JButton("Check Out");
-        JButton btnTrans      = new JButton("Transactions");
+        JButton btnTrans      = new JButton("Current Loans");
         JButton btnLogout     = new JButton("Logout");
 
         boolean isAdmin = "ADMIN".equalsIgnoreCase(Session.currentRole);
@@ -40,6 +40,8 @@ public class MainFrame extends JFrame {
         sidebar.add(btnEmployees);
         sidebar.add(btnCheckIn);
         sidebar.add(btnCheckOut);
+        boolean isLibSidebar = "LIBRARIAN".equalsIgnoreCase(Session.currentRole);
+        btnTrans.setVisible(isLibSidebar);
         sidebar.add(btnTrans);
 
         sidebar.add(Box.createVerticalStrut(16));
@@ -73,7 +75,7 @@ public class MainFrame extends JFrame {
         btnEmployees.addActionListener(e -> setContent(new EmployeeForm()));
         btnCheckIn.addActionListener(e -> setContent(new CheckInForm()));
         btnCheckOut.addActionListener(e -> setContent(new CheckOutForm()));
-        btnTrans.addActionListener(e -> setContent(new TransactionForm()));
+        btnTrans.addActionListener(e -> OpenLoansDialog.showView(this));
         btnLogout.addActionListener(e -> {
             // clear session khi logout
             Session.currentUserId   = null;
